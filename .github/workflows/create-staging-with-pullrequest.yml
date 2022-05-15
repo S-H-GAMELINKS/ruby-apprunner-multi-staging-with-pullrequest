@@ -1,0 +1,71 @@
+name: 'Create staging with pull request'
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.1.9
+
+      - name: Init
+        run: terraform init
+        working-directory: infra
+      
+      - name: Get
+        run: terraform get
+        working-directory: infra
+
+      - name: Apply
+        id: apply
+        run: terraform apply -auto-approve -var 'pr_number=${{ github.event.number }}' -var 'commit_hash=${{ github.sha }}' -var 'region=${{ secrets.AWS_REGION }}'
+        working-directory: infra
+        continue-on-error: true
+
+      - name: Login to Amazon ECR
+        if: ${{ steps.apply.outcome == 'failure' }}
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Push Container(Only synchronize pull request)
+        if: ${{ steps.apply.outcome == 'failure' }}
+        run: |
+          docker build -t ${{ secrets.AWS_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pullrequest-${{ github.event.number }}:latest .
+          docker push ${{ secrets.AWS_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pullrequest-${{ github.event.number }}:latest
+
+      - name: Comment
+        if: ${{ steps.apply.outcome != 'failure' }}
+        uses: actions/github-script@v3.0.0
+        env:
+          RESULT: "${{ steps.apply.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `${process.env.RESULT}`;
+            
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })

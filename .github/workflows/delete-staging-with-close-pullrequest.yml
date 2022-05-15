@@ -1,0 +1,51 @@
+name: 'Delete staging with pull request'
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get AppRunner Service ARN
+        id: apprunner-service-arn
+        run: |
+          service_arn=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='pullrequest-${{ github.event.number }}'].ServiceArn | [0]")
+          echo "::set-output name=stdout::$service_arn"
+
+      - name: Delete AppRunner Service
+        run: aws apprunner delete-service --service-arn ${{ steps.apprunner-service-arn.outputs.stdout }}
+
+      - name: Delete ECR repository
+        run: aws ecr delete-repository --repository-name pullrequest-${{ github.event.number }} --force
+
+      - name: Get Role attachment policy
+        id: role-attachment-policy
+        run: |
+          role_attachment_policy=$(aws iam list-attached-role-policies --role-name pullrequest-4-service-role --query "AttachedPolicies[0].PolicyArn")
+          echo "::set-output name=stdout::$role_attachment_policy"
+
+      - name: Dettach policy
+        run: aws iam detach-role-policy --role-name pullrequest-${{ github.event.number }}-service-role --policy-arn ${{ steps.role-attachment-policy.outputs.stdout }}
+
+      - name: Delete role
+        run: aws iam delete-role --role-name pullrequest-${{ github.event.number }}-service-role
+
+
