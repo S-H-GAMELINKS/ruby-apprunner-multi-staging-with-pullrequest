@@ -52,20 +52,3 @@ jobs:
         run: |
           docker build -t ${{ secrets.AWS_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pullrequest-${{ github.event.number }}:latest .
           docker push ${{ secrets.AWS_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/pullrequest-${{ github.event.number }}:latest
-
-      - name: Comment
-        if: ${{ steps.apply.outcome != 'failure' }}
-        uses: actions/github-script@v3.0.0
-        env:
-          RESULT: "${{ steps.apply.outputs.stdout }}"
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `${process.env.RESULT}`;
-            
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
